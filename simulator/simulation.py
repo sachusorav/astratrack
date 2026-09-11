@@ -19,7 +19,10 @@ from typing import Dict, List, Optional, Any
 
 from simulator.target3d import Target3D, TargetConfig
 from simulator.camera3d import TrackingCamera3D, CameraConfig3D
-from simulator.scenarios import Scenario, get_scenario_stationary, get_scenario_by_id_or_key
+from simulator.scenarios import (
+    Scenario, get_scenario_stationary, get_scenario_by_id_or_key,
+    get_scenario_mode, list_scenarios_by_mode, MODE_LABELS, MODE_GROUPS
+)
 from simulator.renderer import Renderer3D
 
 
@@ -48,8 +51,9 @@ class Simulation3D:
         self.use_pipeline = use_pipeline
         self.detector_type = detector_type
 
-        # Active scenario
+        # Active scenario & mode
         self.scenario: Scenario = scenario or get_scenario_stationary()
+        self.active_mode: str = get_scenario_mode(self.scenario.id)
 
         # Components
         self.target: Target3D = None
@@ -68,6 +72,10 @@ class Simulation3D:
         self.step_count: int = 0
         self.fps: float = 0.0
 
+        # Switch flash (on-screen confirmation banner)
+        self.switch_flash_timer: float = 0.0   # seconds remaining to show flash
+        self.switch_flash_label: str = ""       # text shown in the flash banner
+
         # Metrics accumulators
         self._locked_steps: int = 0
         self._error_history: List[float] = []
@@ -82,7 +90,7 @@ class Simulation3D:
     # ------------------------------------------------------------------ #
 
     def load_scenario(self, scenario_or_key):
-        """Switch active scenario by Scenario instance or key ('1'-'6')."""
+        """Switch active scenario by Scenario instance or key ('1'-'9')."""
         if isinstance(scenario_or_key, Scenario):
             self.scenario = scenario_or_key
         else:
@@ -91,7 +99,49 @@ class Simulation3D:
                 self.scenario = scen
             else:
                 return False
+        self.active_mode = get_scenario_mode(self.scenario.id)
         self.reset()
+        return True
+
+    def switch_scene(self, mode: str, scenario_key: str) -> bool:
+        """
+        Hot-swap the active scenario and communication mode at runtime.
+
+        Safe to call at any point — mid-tracking, mid-pause, any FSM state.
+        Tears down current state and reinitializes cleanly into the new scenario.
+
+        Args:
+            mode: "ground_to_sat" or "sat_to_sat"
+            scenario_key: Scenario ID string or numeric key ('1'-'9')
+
+        Returns:
+            True if switch succeeded, False if mode/key was invalid.
+        """
+        # Validate mode
+        if mode not in MODE_GROUPS:
+            print(f"[WARN] switch_scene: unknown mode '{mode}' — ignored.")
+            return False
+
+        # Validate scenario exists and belongs to the requested mode
+        scen = get_scenario_by_id_or_key(scenario_key)
+        if scen is None:
+            print(f"[WARN] switch_scene: unknown scenario '{scenario_key}' — ignored.")
+            return False
+        if scen.id not in MODE_GROUPS[mode]:
+            print(f"[WARN] switch_scene: scenario '{scen.id}' does not belong to mode '{mode}' — ignored.")
+            return False
+
+        # Apply switch
+        self.scenario = scen
+        self.active_mode = mode
+
+        # Arm the on-screen confirmation banner
+        mode_label = MODE_LABELS.get(mode, mode)
+        self.switch_flash_label = f"\u27f6 {mode_label}  |  {scen.name}"
+        self.switch_flash_timer = 1.5
+
+        self.reset()
+        print(f"[SWITCH] Mode: {mode_label}  |  Scenario: {scen.name}")
         return True
 
     def reset(self):
@@ -112,8 +162,14 @@ class Simulation3D:
         self._error_history.clear()
         self._last_wall_time = time.perf_counter()
         self._last_pipeline_telem = {}
+        # Don't clear switch_flash here — let it expire naturally so the banner shows
         if self._pipeline is not None:
             self._pipeline.reset()
+
+    @property
+    def node_count(self) -> int:
+        """Number of active nodes: 1 for ground_to_sat, 2 for sat_to_sat."""
+        return 2 if self.active_mode == "sat_to_sat" else 1
 
     def set_deterministic(self, enable: bool, seed: Optional[int] = 42):
         """Toggle deterministic simulation mode."""
@@ -155,6 +211,10 @@ class Simulation3D:
             instant_fps = 1.0 / max(1e-5, (now - self._last_wall_time))
             self.fps = 0.9 * self.fps + 0.1 * instant_fps
         self._last_wall_time = now
+
+        # Decrement switch flash timer
+        if self.switch_flash_timer > 0.0:
+            self.switch_flash_timer = max(0.0, self.switch_flash_timer - dt)
 
         # 1. Update Target Kinematics
         self.target.update(dt)
@@ -217,8 +277,12 @@ class Simulation3D:
             "step_count": self.step_count,
             "fps": self.fps,
             "mode": "Deterministic" if self.deterministic else "Real-Time",
+            "active_mode": self.active_mode,
+            "active_mode_label": MODE_LABELS.get(self.active_mode, self.active_mode),
+            "node_count": self.node_count,
             "scenario_id": self.scenario.id,
             "scenario_name": self.scenario.name,
+            "scenario_category": self.scenario.category,
             "target_pos": self.target.position.copy(),
             "target_vel": self.target.velocity.copy(),
             "camera_pan": self.camera.pan_deg,
@@ -231,6 +295,9 @@ class Simulation3D:
             "snr_db": max(0.0, base_snr),
             "is_paused": self.is_paused,
             "pipeline_active": self._pipeline is not None,
+            # Switch flash
+            "switch_flash_active": self.switch_flash_timer > 0.0,
+            "switch_flash_label": self.switch_flash_label,
         }
         # Merge pipeline telemetry (IDetector / Kalman / FSM / PID)
         if self._last_pipeline_telem:

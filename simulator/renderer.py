@@ -22,6 +22,7 @@ from simulator.math3d import (
 )
 from simulator.target3d import Target3D
 from simulator.camera3d import TrackingCamera3D
+from simulator.scenarios import MODE_GROUPS, MODE_LABELS, list_scenarios_by_mode
 
 
 class ViewMode(Enum):
@@ -105,6 +106,11 @@ class Renderer3D:
         self.show_coordinate_axes: bool = True
         self.show_telemetry_hud: bool = True
         self.show_pip_sensor: bool = True
+        self.show_control_panel: bool = True
+
+        # Clickable control regions (refreshed each frame by _draw_control_panel)
+        # Each entry: {"action": str, "rect": (x1, y1, x2, y2)}
+        self._ctrl_regions: List[Dict] = []
 
         # Internal animation time
         self._strobe_phase: float = 0.0
@@ -195,6 +201,14 @@ class Renderer3D:
 
         # 11. View mode badge & quick hotkey bar
         self._draw_status_bar(frame, telemetry_data)
+
+        # 12. On-screen interactive control panel
+        if self.show_control_panel:
+            self._draw_control_panel(frame, telemetry_data)
+
+        # 13. Switch flash confirmation banner (always drawn when active)
+        if telemetry_data.get("switch_flash_active", False):
+            self._draw_switch_flash(frame, telemetry_data.get("switch_flash_label", ""))
 
         return frame
 
@@ -726,14 +740,165 @@ class Renderer3D:
         cv2.rectangle(frame, (0, bar_y), (self.width, self.height), (12, 10, 8), -1)
         cv2.line(frame, (0, bar_y), (self.width, bar_y), AerospaceColors.PANEL_BORDER, 1)
 
-
+        mode_lbl = telem.get("active_mode_label", "Ground → Satellite")
         status_txt = (
-            f"VIEW: {self.view_mode.value.upper()} | "
-            f"ORBIT: AZ {self.orbit_azimuth_deg:.0f}° EL {self.orbit_elevation_deg:.0f}° R {self.orbit_distance:.0f}m | "
-            f"[1-6] Scenario  [V] View Mode  [SPACE] Pause  [R] Reset  [T] Trail  [F] FOV  [L] LOS  [H] HUD"
+            f"MODE: {mode_lbl}  |"
+            f" VIEW: {self.view_mode.value.upper()} |"
+            f" [1-6] Gnd Scen  [7-9] Sat Scen  [M] Mode  [V] View  [SPACE] Pause  [R] Reset  [C] Panel"
         )
         cv2.putText(frame, status_txt, (15, bar_y + 18),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.34, AerospaceColors.HUD_TEXT_MUTED, 1, cv2.LINE_AA)
+
+    # ------------------------------------------------------------------ #
+    # Interactive Control Panel
+    # ------------------------------------------------------------------ #
+
+    def _draw_control_panel(self, frame: np.ndarray, telem: Dict):
+        """
+        Draw the on-screen interactive control panel (bottom-right corner).
+
+        Renders a semi-transparent panel with:
+        - Communication mode badge + toggle button
+        - Scenario buttons for the current mode
+        - Play/Pause, Reset, Step action buttons
+
+        Also populates self._ctrl_regions for mouse hit-testing.
+        """
+        self._ctrl_regions = []
+
+        panel_w = 310
+        active_mode = telem.get("active_mode", "ground_to_sat")
+        active_scen = telem.get("scenario_id", "")
+        is_paused = telem.get("is_paused", False)
+
+        # Determine height based on scenario count in current mode
+        scen_count = len(MODE_GROUPS.get(active_mode, []))
+        panel_h = 85 + scen_count * 24 + 10   # header + scenarios + playback row
+        panel_h = max(panel_h, 160)
+
+        panel_x = self.width - panel_w - 15
+        panel_y = self.height - 28 - panel_h - 8   # above status bar
+
+        # Semi-transparent background
+        overlay = frame.copy()
+        cv2.rectangle(overlay, (panel_x, panel_y), (panel_x + panel_w, panel_y + panel_h),
+                      (20, 16, 12), -1)
+        cv2.addWeighted(overlay, 0.88, frame, 0.12, 0, frame)
+        cv2.rectangle(frame, (panel_x, panel_y), (panel_x + panel_w, panel_y + panel_h),
+                      AerospaceColors.PANEL_BORDER, 1)
+
+        cy = panel_y + 18
+
+        # ---- Header: "LIVE CONTROLS" ----
+        cv2.putText(frame, "LIVE CONTROLS", (panel_x + 10, cy),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.42, AerospaceColors.HUD_ACCENT, 1, cv2.LINE_AA)
+        cv2.line(frame, (panel_x + 10, cy + 5), (panel_x + panel_w - 10, cy + 5),
+                 AerospaceColors.PANEL_BORDER, 1)
+        cy += 18
+
+        # ---- Mode badge + toggle button ----
+        mode_label = MODE_LABELS.get(active_mode, active_mode)
+        mode_color = (100, 230, 180) if active_mode == "ground_to_sat" else (80, 170, 255)
+
+        cv2.putText(frame, "MODE:", (panel_x + 10, cy),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.36, AerospaceColors.HUD_TEXT_MUTED, 1, cv2.LINE_AA)
+        cv2.putText(frame, mode_label, (panel_x + 58, cy),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.38, mode_color, 1, cv2.LINE_AA)
+
+        # Toggle button
+        btn_x1, btn_y1 = panel_x + panel_w - 60, cy - 13
+        btn_x2, btn_y2 = panel_x + panel_w - 5, cy + 3
+        cv2.rectangle(frame, (btn_x1, btn_y1), (btn_x2, btn_y2), mode_color, 1)
+        cv2.putText(frame, "[M]", (btn_x1 + 8, btn_y2 - 3),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.33, mode_color, 1, cv2.LINE_AA)
+        self._ctrl_regions.append({"action": "toggle_mode", "rect": (btn_x1, btn_y1, btn_x2, btn_y2)})
+        cy += 22
+
+        # ---- Scenario buttons ----
+        cv2.putText(frame, "SCENARIO:", (panel_x + 10, cy),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.34, AerospaceColors.HUD_TEXT_MUTED, 1, cv2.LINE_AA)
+        cy += 16
+
+        scenarios_in_mode = list_scenarios_by_mode(active_mode)
+        key_numbers = list(range(1, 7)) if active_mode == "ground_to_sat" else list(range(7, 10))
+
+        for i, scen in enumerate(scenarios_in_mode):
+            is_active = (scen.id == active_scen)
+            btn_color = AerospaceColors.HUD_ACCENT if is_active else AerospaceColors.HUD_TEXT_MUTED
+            bg_color = (45, 38, 30) if is_active else (25, 20, 16)
+
+            key_num = key_numbers[i] if i < len(key_numbers) else "?"
+            label = f"[{key_num}]  {scen.name}"
+
+            row_y1 = cy - 12
+            row_y2 = cy + 5
+            # Background highlight for active
+            if is_active:
+                cv2.rectangle(frame, (panel_x + 8, row_y1 - 1), (panel_x + panel_w - 8, row_y2 + 1),
+                              bg_color, -1)
+            cv2.putText(frame, label, (panel_x + 14, cy),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.34, btn_color, 1, cv2.LINE_AA)
+
+            difficulty = scen.metadata.get("difficulty", "")
+            diff_color = {
+                "Nominal": AerospaceColors.LOCK_LOCKED,
+                "Low": AerospaceColors.LOCK_LOCKED,
+                "Medium": AerospaceColors.LOCK_ACQUIRING,
+                "High": AerospaceColors.HUD_WARN,
+                "Critical": AerospaceColors.LOCK_LOST,
+                "Severe": AerospaceColors.LOCK_LOST,
+            }.get(difficulty, AerospaceColors.HUD_TEXT_MUTED)
+            cv2.putText(frame, difficulty, (panel_x + panel_w - 75, cy),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.30, diff_color, 1, cv2.LINE_AA)
+
+            self._ctrl_regions.append({
+                "action": f"set_scenario:{scen.id}",
+                "rect": (panel_x + 8, row_y1 - 1, panel_x + panel_w - 8, row_y2 + 1)
+            })
+            cy += 24
+
+        cy += 4
+        cv2.line(frame, (panel_x + 10, cy), (panel_x + panel_w - 10, cy),
+                 AerospaceColors.PANEL_BORDER, 1)
+        cy += 14
+
+        # ---- Playback buttons: Pause/Play | Reset | Step ----
+        btn_w = 82
+        btn_h = 18
+        btns = [
+            ("pause" if not is_paused else "resume",
+             "[SPC] PAUSE" if not is_paused else "[SPC] RESUME",
+             AerospaceColors.LOCK_ACQUIRING if not is_paused else AerospaceColors.LOCK_LOCKED),
+            ("reset", "[R] RESET", AerospaceColors.HUD_TEXT_MUTED),
+            ("step",  "[N] STEP",  AerospaceColors.HUD_TEXT_MUTED),
+        ]
+        bx = panel_x + 10
+        for action, label, color in btns:
+            bx1, by1 = bx, cy - btn_h + 4
+            bx2, by2 = bx + btn_w - 4, cy + 4
+            cv2.rectangle(frame, (bx1, by1), (bx2, by2), color, 1)
+            cv2.putText(frame, label, (bx1 + 4, cy),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.31, color, 1, cv2.LINE_AA)
+            self._ctrl_regions.append({"action": action, "rect": (bx1, by1, bx2, by2)})
+            bx += btn_w
+
+    def _draw_switch_flash(self, frame: np.ndarray, label: str):
+        """
+        Draw a full-width amber confirmation banner at the top of the frame.
+        Shown for ~1.5 seconds after a scenario switch.
+        """
+        banner_h = 36
+        overlay = frame.copy()
+        cv2.rectangle(overlay, (0, 38), (self.width, 38 + banner_h), (20, 50, 80), -1)
+        cv2.addWeighted(overlay, 0.80, frame, 0.20, 0, frame)
+        cv2.rectangle(frame, (0, 38), (self.width, 38 + banner_h), AerospaceColors.HUD_ACCENT, 1)
+
+        # Center the text
+        text_size, _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.52, 2)
+        tx = max(10, (self.width - text_size[0]) // 2)
+        ty = 38 + banner_h // 2 + 7
+        cv2.putText(frame, label, (tx, ty),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.52, AerospaceColors.HUD_ACCENT, 2, cv2.LINE_AA)
 
     # ------------------------------------------------------------------ #
     # Observer Navigation Controls
