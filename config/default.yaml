@@ -1,0 +1,47 @@
+world:
+  width: 1600
+  height: 1200
+  background_color: [10, 10, 30]
+
+beacon:
+  radius: 12
+  color_bgr: [0, 255, 100]
+  color_hsv_low: [35, 100, 100]
+  color_hsv_high: [85, 255, 255]
+  speed: 120.0
+  motion_model: sinusoidal
+
+camera:
+  fov_width: 640
+  fov_height: 480
+  max_slew_rate: 8.0
+  inertia: 0.85
+  deg_per_pixel: 0.1
+
+pid:
+  kp: 0.40
+  ki: 0.010
+  kd: 0.10
+  integral_limit: 100.0
+  dead_zone: 2.0
+  output_limit: 10.0
+
+kalman:
+  process_noise: 0.01
+  measurement_noise: 5.0
+  initial_covariance: 1.0
+  coast_limit: 60
+  prediction_horizon: 30
+
+disturbance:
+  turbulence_strength: 0.0
+  vibration_amplitude: 0.0
+  noise_sigma: 5.0
+  scintillation_variance: 0.0
+  target_max_accel: 0.0
+
+ui:
+  window_width: 1280
+  window_height: 800
+  plot_history: 300
+  update_rate: 60.0
