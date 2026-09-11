@@ -88,6 +88,14 @@ def main():
         "--save-screenshot", type=str, default=None,
         help="Save an initial screenshot to this path and continue"
     )
+    parser.add_argument(
+        "--pipeline", action="store_true",
+        help="Enable full perception pipeline (IDetector → Kalman → FSM → PID) instead of direct gimbal"
+    )
+    parser.add_argument(
+        "--detector", type=str, default="classical",
+        help="Detector backend when --pipeline is active: 'classical' (default) or 'ai'"
+    )
 
     args = parser.parse_args()
 
@@ -107,6 +115,7 @@ def main():
     print(f"  Description:     {scenario.description}")
     print(f"  Mode:            {'DETERMINISTIC' if args.deterministic else 'REAL-TIME'}")
     print(f"  Resolution:      {args.width}x{args.height}")
+    print(f"  Pipeline:        {'ENABLED [' + args.detector.upper() + ' detector]' if args.pipeline else 'DISABLED (direct gimbal)'}")
     print(f"------------------------------------------------------------")
     print(f"  Controls:")
     print(f"    [1-6]      Switch Scenarios")
@@ -132,7 +141,9 @@ def main():
         scenario=scenario,
         width=args.width,
         height=args.height,
-        deterministic=args.deterministic
+        deterministic=args.deterministic,
+        use_pipeline=args.pipeline,
+        detector_type=args.detector,
     )
 
     # Video writer setup if recording

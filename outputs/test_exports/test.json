@@ -1,0 +1,72 @@
+{
+  "run_id": "EXP-TEST-001",
+  "timestamp": "2026-09-09T00:00:00Z",
+  "scenario": "01_BASELINE",
+  "configuration": {
+    "fov_w": 640,
+    "fov_h": 480
+  },
+  "disturbance_settings": {
+    "preset": "NORMAL"
+  },
+  "detector": "ClassicalCV-HSV",
+  "controller": "PID",
+  "filter_settings": {
+    "type": "Kalman-4D"
+  },
+  "metrics": {
+    "simulation_duration_s": 0.18,
+    "fps": 99788.1,
+    "detection_fps": 55.6,
+    "inference_time_ms": 8.0,
+    "processing_latency_ms": 11.0,
+    "acquisition_time_s": 0.0,
+    "average_tracking_error_px": 2.5,
+    "average_tracking_error_deg": 0.25,
+    "maximum_tracking_error_px": 2.5,
+    "maximum_tracking_error_deg": 0.25,
+    "rms_tracking_error_px": 2.5,
+    "rms_tracking_error_deg": 0.25,
+    "lock_retention_rate_pct": 100.0,
+    "target_loss_count": 0,
+    "successful_recovery_count": 0,
+    "recovery_time_s": 0.0,
+    "detection_confidence": 0.9,
+    "prediction_error_px": 0.0,
+    "camera_angular_error_deg": 0.25
+  },
+  "pass_fail_status": "PASS",
+  "criteria_checklist": [
+    {
+      "name": "Lock Retention Rate",
+      "target": ">= 85.0%",
+      "actual": "100.0%",
+      "passed": true
+    },
+    {
+      "name": "RMS Tracking Error",
+      "target": "<= 15.0 px",
+      "actual": "2.50 px",
+      "passed": true
+    },
+    {
+      "name": "Maximum Tracking Error",
+      "target": "<= 40.0 px",
+      "actual": "2.50 px",
+      "passed": true
+    },
+    {
+      "name": "Processing Pipeline Latency",
+      "target": "<= 35.0 ms",
+      "actual": "11.00 ms",
+      "passed": true
+    },
+    {
+      "name": "Mean Re-Acquisition Time",
+      "target": "<= 2.00 s",
+      "actual": "0.00 s",
+      "passed": true
+    }
+  ],
+  "summary_notes": ""
+}

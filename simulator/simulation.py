@@ -9,12 +9,13 @@ Supports:
 - Real-time interactive mode
 - Multi-scenario switching
 - Full telemetry logging
+- Optional full perception pipeline (IDetector → Kalman → FSM → PID)
 """
 
 import time
 import math
 import numpy as np
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 
 from simulator.target3d import Target3D, TargetConfig
 from simulator.camera3d import TrackingCamera3D, CameraConfig3D
@@ -37,11 +38,15 @@ class Simulation3D:
     def __init__(self, scenario: Optional[Scenario] = None,
                  width: int = 1280, height: int = 720,
                  deterministic: bool = False,
-                 fixed_dt: float = 0.02):
+                 fixed_dt: float = 0.02,
+                 use_pipeline: bool = False,
+                 detector_type: str = "classical"):
         self.width = width
         self.height = height
         self.deterministic = deterministic
         self.fixed_dt = fixed_dt
+        self.use_pipeline = use_pipeline
+        self.detector_type = detector_type
 
         # Active scenario
         self.scenario: Scenario = scenario or get_scenario_stationary()
@@ -50,6 +55,12 @@ class Simulation3D:
         self.target: Target3D = None
         self.camera: TrackingCamera3D = None
         self.renderer: Renderer3D = Renderer3D(width=width, height=height)
+
+        # Optional full perception/estimation/control pipeline
+        self._pipeline = None
+        if use_pipeline:
+            from simulator.pipeline3d import Pipeline3D
+            self._pipeline = Pipeline3D(detector_type=detector_type)
 
         # Simulation state
         self.is_paused: bool = False
@@ -61,6 +72,7 @@ class Simulation3D:
         self._locked_steps: int = 0
         self._error_history: List[float] = []
         self._last_wall_time: float = time.perf_counter()
+        self._last_pipeline_telem: Dict[str, Any] = {}
 
         # Initialize scenario
         self.reset()
@@ -99,6 +111,9 @@ class Simulation3D:
         self._locked_steps = 0
         self._error_history.clear()
         self._last_wall_time = time.perf_counter()
+        self._last_pipeline_telem = {}
+        if self._pipeline is not None:
+            self._pipeline.reset()
 
     def set_deterministic(self, enable: bool, seed: Optional[int] = 42):
         """Toggle deterministic simulation mode."""
@@ -145,7 +160,19 @@ class Simulation3D:
         self.target.update(dt)
 
         # 2. Update Ground Tracking Camera
-        self.camera.update(dt, self.target.position, target_visible=self.target.visible)
+        if self._pipeline is not None and self.target.visible:
+            # Full perception → estimation → control pipeline
+            self._last_pipeline_telem = self._pipeline.step(
+                dt, self.target, self.camera, self.renderer
+            )
+            # Update angular error estimate for metrics (from Kalman pixel error)
+            if self._last_pipeline_telem.get("pid_error_px", 0) > 0:
+                err_deg = self._last_pipeline_telem["pid_error_px"] * self.camera.config.fov_deg / 640.0
+                self.camera.angular_error_deg = err_deg
+                self.camera.is_locked = (err_deg < self.camera.config.fov_deg * 0.4)
+        else:
+            # Direct proportional gimbal (default, existing behaviour)
+            self.camera.update(dt, self.target.position, target_visible=self.target.visible)
 
         # 3. Accumulate tracking metrics
         self.sim_time += dt
@@ -159,6 +186,14 @@ class Simulation3D:
     # ------------------------------------------------------------------ #
     # Rendering & Telemetry
     # ------------------------------------------------------------------ #
+
+    def get_sensor_frame(self, w: int = 640, h: int = 480) -> np.ndarray:
+        """
+        Return the rendered sensor-view frame (what the tracking camera sees).
+
+        This is a (H, W, 3) BGR uint8 numpy array suitable for IDetector.detect().
+        """
+        return self.renderer._render_sensor_view(self.target, self.camera, w, h)
 
     def render(self) -> np.ndarray:
         """Render the current simulation state to an image frame."""
@@ -177,7 +212,7 @@ class Simulation3D:
         if not self.target.visible:
             base_snr = 0.0
 
-        return {
+        telem = {
             "sim_time": self.sim_time,
             "step_count": self.step_count,
             "fps": self.fps,
@@ -195,4 +230,9 @@ class Simulation3D:
             "slant_range_m": slant_range,
             "snr_db": max(0.0, base_snr),
             "is_paused": self.is_paused,
+            "pipeline_active": self._pipeline is not None,
         }
+        # Merge pipeline telemetry (IDetector / Kalman / FSM / PID)
+        if self._last_pipeline_telem:
+            telem.update(self._last_pipeline_telem)
+        return telem

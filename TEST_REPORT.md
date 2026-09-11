@@ -1,36 +1,24 @@
-# ASTRATRACK — Formal Quality Assurance Test & Verification Report
+# ASTRATRACK — Test Report
 
-**System Name:** ASTRATRACK (Free Space Optical Communication Coarse Alignment & Tracking Engine)  
-**Document Identifier:** ATR-QA-TR-2026-001  
-**Report Release Date:** September 9, 2026  
-**QA Lead / Authority:** Senior Quality Assurance Engineer (Flight Software & PAT Systems)  
-**Verification Standard:** ISO/IEC/IEEE 29119 Software Testing Standards & Aerospace R&D Acceptance Criteria  
+**Project:** ASTRATRACK (Free Space Optical Communication Coarse Alignment & Tracking Engine)  
+**Date:** September 9, 2026  
+**Test runner:** pytest 8.3.4 on Windows x86_64, Python 3.13.5 (Anaconda)
 
 ---
 
-## 1. Executive Summary
+## 1. Summary
 
-A comprehensive automated verification suite was developed and executed across the entire ASTRATRACK codebase. The verification regime spans foundational unit tests, algorithmic component validations, closed-loop pipeline integration tests, and severe operational stress/robustness evaluations.
+75 tests were collected and run against the 2D pipeline (`perception/`, `estimation/`, `control/`, `tracking/`, `disturbance/`, `logging_/`, `metrics/`, `scenarios/`, `lab/`, `experiments/`, `demo/`, `docs_generator/`). All 75 passed; 0 failed; 0 skipped.
 
-### 1.1 Test Execution Scorecard
+Note: the `simulator/` 3D engine (`simulator/renderer.py`, `camera3d.py`, `target3d.py`, `simulation.py`, `pipeline3d.py`) is **not covered** by this test suite — it is validated by running `run_3d_simulator.py` interactively.
 
-| Metric | Result | Compliance |
-|:---|:---:|:---:|
-| **Total Tests Collected** | **75** | 100.0% of Test Matrix |
-| **Tests Passed** | **75** | **100.0% Pass Rate** |
-| **Tests Failed** | **0** | **0.0% Failure Rate** |
-| **Tests Skipped** | **0** | No Skipped / Suppressed Tests |
-| **Execution Platform** | Windows NT (x86_64) | Python 3.13.5 (Anaconda) |
-| **Test Runner Engine** | pytest 8.3.4 (pluggy 1.5.0) | Multi-module test runner |
-| **Total Test Duration** | **224.43 seconds (03m:44s)** | Real-time simulation execution |
-| **Synthetic / Mocked Data** | **0%** | 100% Empirically Measured Physics |
-
-```
-============================== TEST EXECUTION SUMMARY ==============================
-TOTAL: 75     PASSED: 75     FAILED: 0     SKIPPED: 0     SUCCESS RATE: 100%
-STATUS: CERTIFIED FOR AEROSPACE SIMULATION & BENCHMARKING OPERATIONS
-====================================================================================
-```
+| Metric | Result |
+|:---|:---|
+| Tests collected | 75 |
+| Passed | 75 |
+| Failed | 0 |
+| Skipped | 0 |
+| Total duration | 224.43 s |
 
 ---
 
@@ -316,19 +304,15 @@ In compliance with rigorous aerospace verification standards, the following arch
 
 ---
 
-## 7. QA Engineering Sign-off & Recommendation
+---
 
-### 7.1 Regression Suite Assessment
-The test suite executed with **zero failures** and **zero regressions**. Fixes implemented during testing resolved edge-case behaviors:
-1. Registered explicit `"static"` motion model in `sim/motion_models.py` to support stationary calibration targets.
-2. Verified Kalman positive semi-definiteness during prolonged 30-frame dropouts.
-3. Validated forward lead prediction compensation under 6-frame transport lag.
-4. Corrected deprecation warnings in `experiments/manager.py` using standard UTC timezone objects.
+## 7. What is and isn't covered
 
-### 7.2 Release Verdict
-**VERDICT: APPROVED FOR PRODUCTION & SCIENTIFIC BENCHMARKING**  
-The ASTRATRACK software system satisfies all functional, architectural, performance, and robustness requirements. It is certified for automated benchmark reporting, scenario evaluations, and aerospace demonstration protocols.
+These tests cover the **2D simulation pipeline**: perception, estimation, control, tracking FSM, disturbance engine, logging, metrics, scenarios, experiments, comparison lab, demo, and documentation generator.
 
-**Senior Quality Assurance Engineer**  
-*Flight Software & PAT Systems Verification Team*  
-*ASTRATRACK Project*
+They do **not** cover:
+- `simulator/` — the 3D renderer, camera3d, target3d, math3d, pipeline3d, or scenarios3d. These are validated by running `run_3d_simulator.py` manually.
+- Hardware-in-the-loop or real FSOC hardware — all tests run entirely in software simulation.
+- Absolute pointing accuracy on real skies — the simulation uses geometric approximations for atmospheric turbulence, not wave-optics propagation.
+
+See the "Known Limitations" section (section 6 above) for a full list of known boundaries, which remains accurate.

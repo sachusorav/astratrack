@@ -667,11 +667,65 @@ class Renderer3D:
                         cv2.FONT_HERSHEY_SIMPLEX, 0.34, AerospaceColors.HUD_TEXT_PRIMARY, 1, cv2.LINE_AA)
             ty += 24
 
+        # Pipeline Card (shown only when --pipeline is active)
+        if telem.get("pipeline_active", False):
+            self._draw_pipeline_card(frame, telem, card_x, card_y + card_h + 10, card_w)
+
+    def _draw_pipeline_card(self, frame: np.ndarray, telem: Dict,
+                            x: int, y: int, w: int):
+        """Draw compact pipeline status card (IDetector / Kalman / FSM / PID)."""
+        card_h = 175
+        # Guard: don't draw off-screen
+        if y + card_h >= self.height - 30:
+            return
+
+        overlay = frame.copy()
+        cv2.rectangle(overlay, (x, y), (x + w, y + card_h), AerospaceColors.PANEL_BG, -1)
+        cv2.addWeighted(overlay, 0.85, frame, 0.15, 0, frame)
+        cv2.rectangle(frame, (x, y), (x + w, y + card_h), AerospaceColors.PANEL_BORDER, 1)
+
+        cv2.putText(frame, "PERCEPTION PIPELINE", (x + 10, y + 18),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.38, AerospaceColors.HUD_ACCENT, 1, cv2.LINE_AA)
+        cv2.line(frame, (x + 10, y + 24), (x + w - 10, y + 24),
+                 AerospaceColors.PANEL_BORDER, 1)
+
+        # FSM state with colour coding
+        fsm_str = telem.get("fsm_state", "—")
+        fsm_color = {
+            "LOCKED": AerospaceColors.LOCK_LOCKED,
+            "TRACKING": AerospaceColors.LOCK_LOCKED,
+            "ACQUIRING": AerospaceColors.LOCK_ACQUIRING,
+            "PREDICTING": AerospaceColors.LOCK_ACQUIRING,
+            "REACQUIRING": AerospaceColors.HUD_WARN,
+            "TARGET_LOST": AerospaceColors.LOCK_LOST,
+            "SEARCHING": AerospaceColors.LOCK_LOST,
+        }.get(fsm_str, AerospaceColors.HUD_TEXT_PRIMARY)
+
+        rows = [
+            ("FSM State", fsm_str, fsm_color),
+            ("Detection", telem.get("detection_status", "—"), AerospaceColors.HUD_TEXT_PRIMARY),
+            ("Confidence", f"{telem.get('detection_confidence', 0.0):.2f}", AerospaceColors.HUD_TEXT_PRIMARY),
+            ("Kalman X,Y", f"{telem.get('kalman_pos', ('—','—'))[0]:.0f}, {telem.get('kalman_pos', ('—','—'))[1]:.0f} px"
+             if telem.get('kalman_pos') else "—", AerospaceColors.HUD_TEXT_PRIMARY),
+            ("PID Err", f"{telem.get('pid_error_px', 0.0):.1f} px", AerospaceColors.HUD_TEXT_PRIMARY),
+            ("FSM Losses", f"{telem.get('fsm_losses', 0)}  Recov: {telem.get('fsm_recoveries', 0)}", AerospaceColors.HUD_TEXT_PRIMARY),
+            ("Kalman Coast", f"{telem.get('kalman_coast_frames', 0)} frames", AerospaceColors.HUD_TEXT_PRIMARY),
+        ]
+
+        ty = y + 42
+        for label, val, color in rows:
+            cv2.putText(frame, label, (x + 12, ty),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.32, AerospaceColors.HUD_TEXT_MUTED, 1, cv2.LINE_AA)
+            cv2.putText(frame, str(val), (x + 118, ty),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.32, color, 1, cv2.LINE_AA)
+            ty += 20
+
     def _draw_status_bar(self, frame: np.ndarray, telem: Dict):
         """Draw bottom status & hotkeys strip."""
         bar_y = self.height - 28
         cv2.rectangle(frame, (0, bar_y), (self.width, self.height), (12, 10, 8), -1)
         cv2.line(frame, (0, bar_y), (self.width, bar_y), AerospaceColors.PANEL_BORDER, 1)
+
 
         status_txt = (
             f"VIEW: {self.view_mode.value.upper()} | "
